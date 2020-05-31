@@ -127,3 +127,13 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# IDE's
+.idea/*
+*sublime*
+*geany*
+*komodo*
+.vscode/*
+.project
+.pydevproject
+.settings/*
