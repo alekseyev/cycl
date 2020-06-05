@@ -1,32 +1,13 @@
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Optional
 
 import plumbum.cmd
 import typer
 import yaml
-from plumbum import FG, SshMachine
-from pydantic import BaseModel
+from plumbum import FG
 
-
-class AppDeploymentSettings(BaseModel):
-    server = "server"
-    directory = "example"
-    restart_services: List[str] = []
-    compose_file = "docker-compose-deploy.yml"
-    app_host = "example.com"
-    app_port = 12345
-    branch = "master"
-
-
-class Server(BaseModel):
-    host: str
-
-
-class Globals(BaseModel):
-    config_path = typer.get_app_dir("cycl")
-    servers: Dict[str, Server] = {}
-    app = AppDeploymentSettings()
-
+from .models import AppDeploymentSettings, Globals, Server
+from .remote import SshRunner
 
 conf = Globals()
 app = typer.Typer()
@@ -56,11 +37,6 @@ def load_settings() -> None:
         conf.app = AppDeploymentSettings(**app_settings["deploy"])
 
 
-def get_ssh() -> SshMachine:
-    server = conf.servers[conf.app.server]
-    return SshMachine(server.host)
-
-
 @app.command()
 def showremote():
     typer.echo(plumbum.cmd.git("config", "--get", "remote.origin.url"))
@@ -77,10 +53,8 @@ def remote_logs():
     """
     Show logs for remote docker-compose
     """
-    with get_ssh() as ssh:
-        with ssh.cwd(ssh.cwd / conf.app.directory):
-            docker_compose = ssh["docker-compose"]
-            docker_compose["-f", conf.app.compose_file, "logs", "-f", "--tail=100"] & FG
+    with SshRunner(conf) as ssh:
+        ssh.docker_compose["-f", conf.app.compose_file, "logs", "-f", "--tail=100"] & FG
 
 
 @app.command()
@@ -88,19 +62,16 @@ def deploy_update():
     """
     Update remote deployment, restarts only servers in deploy.servers
     """
-    with get_ssh() as ssh:
-        with ssh.cwd(ssh.cwd / conf.app.directory):
-            git = ssh["git"]
-            docker_compose = ssh["docker-compose"]
-            git["checkout", "."] & FG
-            git["pull"] & FG
-            git["checkout", conf.app.branch] & FG
-            git["pull"] & FG
-            docker_compose["-f", conf.app.compose_file, "build"] & FG
-            docker_compose[
-                "-f", conf.app.compose_file, "stop", conf.app.restart_services
-            ] & FG
-            docker_compose["-f", conf.app.compose_file, "up", "-d"] & FG
+    with SshRunner(conf) as ssh:
+        ssh.git["checkout", "."] & FG
+        ssh.git["pull"] & FG
+        ssh.git["checkout", conf.app.branch] & FG
+        ssh.git["pull"] & FG
+        ssh.docker_compose["-f", conf.app.compose_file, "build"] & FG
+        ssh.docker_compose[
+            "-f", conf.app.compose_file, "stop", conf.app.restart_services
+        ] & FG
+        ssh.docker_compose["-f", conf.app.compose_file, "up", "-d"] & FG
 
 
 @app.command()
@@ -108,16 +79,14 @@ def full_update():
     """
     Update remote deployment, rebuilds with --no-cache, restarts ALL servers
     """
-    with get_ssh() as ssh:
-        with ssh.cwd(ssh.cwd / conf.app.directory):
-            git = ssh["git"]
-            docker_compose = ssh["docker-compose"]
-            git["checkout", "."] & FG
-            git["checkout", conf.app.branch] & FG
-            git["pull"] & FG
-            docker_compose["-f", conf.app.compose_file, "build", "--no-cache"] & FG
-            docker_compose["-f", conf.app.compose_file, "down"] & FG
-            docker_compose["-f", conf.app.compose_file, "up", "-d"] & FG
+    with SshRunner(conf) as ssh:
+        ssh.git["checkout", "."] & FG
+        ssh.git["pull"] & FG
+        ssh.git["checkout", conf.app.branch] & FG
+        ssh.git["pull"] & FG
+        ssh.docker_compose["-f", conf.app.compose_file, "build", "--no-cache"] & FG
+        ssh.docker_compose["-f", conf.app.compose_file, "down"] & FG
+        ssh.docker_compose["-f", conf.app.compose_file, "up", "-d"] & FG
 
 
 @app.callback()
