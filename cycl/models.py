@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Dict, List
 
 import typer
@@ -16,9 +17,11 @@ class AppDeploymentSettings(BaseModel):
 
 class Server(BaseModel):
     host: str
+    username = "cycl"
 
 
 class Globals(BaseModel):
-    config_path = typer.get_app_dir("cycl")
+    config_dir = Path(typer.get_app_dir("cycl"))
+    app_config = Path.cwd() / "cycl.yaml"
     servers: Dict[str, Server] = {}
     app = AppDeploymentSettings()

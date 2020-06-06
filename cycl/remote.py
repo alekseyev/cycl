@@ -1,36 +1,43 @@
 from plumbum import SshMachine
 from plumbum.machines.remote import RemoteCommand
 
-from .models import Globals
+from .models import Server
 
 
 class SshRunner:
-    _conf: Globals
-    _chdir: bool
-    _ssh_machine: SshMachine
+    _server: Server
+    _chdir: str
+    _root: bool
+
+    cmd: SshMachine
 
     docker_compose: RemoteCommand
     git: RemoteCommand
+    pip: RemoteCommand
 
-    def __init__(self, conf: Globals, chdir=True):
-        self._conf = conf
+    def __init__(self, server: Server, chdir="", root=False):
+        self._server = server
         self._chdir = chdir
+        self._root = root
 
     def __enter__(self):
-        server = self._conf.servers[self._conf.app.server]
-        self._ssh_machine = SshMachine(server.host)
+        if self._root:
+            username = "root"
+        else:
+            username = self._server.username
+        self.cmd = SshMachine(self._server.host, user=username)
         if self._chdir:
-            if self._conf.app.directory.startswith("/"):
-                self._ssh_machine.cwd.chdir(self._conf.app.directory)
+            if self._chdir.startswith("/"):
+                self.cmd.cwd.chdir(self._chdir)
             else:
-                self._ssh_machine.cwd.chdir(
-                    self._ssh_machine.cwd / self._conf.app.directory
-                )
+                self.cmd.cwd.chdir(self.cmd.cwd / self._chdir)
 
-        self.docker_compose = self._ssh_machine["docker-compose"]
-        self.git = self._ssh_machine["git"]
+        if not self._root:
+            self.docker_compose = self.cmd["docker-compose"]
+            self.git = self.cmd["git"]
+            self.pip = self.cmd["pip"]
 
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self._ssh_machine.close()
+        self.cmd.close()

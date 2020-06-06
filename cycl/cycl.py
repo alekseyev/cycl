@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Optional
 
-import plumbum.cmd
+import plumbum
 import typer
 import yaml
 from plumbum import FG
@@ -14,12 +14,11 @@ app = typer.Typer()
 
 
 def load_settings() -> None:
-    config_dir = Path(conf.config_path)
-    if not config_dir.exists():
+    if not conf.config_dir.exists():
         typer.echo("Warning: configuration directory doesn't exist!")
-        config_dir.mkdir()
+        conf.config_dir.mkdir()
         return
-    config_file_path = config_dir / "config.yaml"
+    config_file_path = conf.config_dir / "config.yaml"
     if not config_file_path.exists():
         typer.echo("Warning: configuration file doesn't exist!")
         return
@@ -28,11 +27,10 @@ def load_settings() -> None:
         conf.servers = {
             name: Server(**server) for name, server in config["servers"].items()
         }
-    app_settings_path = Path.cwd() / "cycl.yaml"
-    if not app_settings_path.exists():
-        typer.echo("Warning: app deployment settings not found")
+    if not conf.app_config.exists():
+        typer.echo(f"Warning: app deployment settings {conf.app_config} not found")
         return
-    with app_settings_path.open("r") as app_settings_file:
+    with conf.app_config.open("r") as app_settings_file:
         app_settings = yaml.safe_load(app_settings_file)
         conf.app = AppDeploymentSettings(**app_settings["deploy"])
 
@@ -49,11 +47,45 @@ def list_servers():
 
 
 @app.command()
+def setup_server(server_name: str):
+    """
+    Setup remote server for future deployments
+    """
+    server = conf.servers[server_name]
+    with SshRunner(server, root=True) as ssh:
+        ssh.cmd["apt"][
+            "install", "-y", "docker-ce", "docker-compose", "nginx", "python-pip"
+        ] & FG
+        try:
+            ssh.cmd["id"]("-u", server.username)
+        except plumbum.ProcessExecutionError:
+            ssh.cmd["useradd"][
+                "-m", "-s", "/bin/bash", "-G", "sudo,docker", server.username
+            ] & FG
+        if not ssh.cmd.path(f"/home/{server.username}/.ssh/authorized_keys").exists():
+            ssh.cmd["rsync"][
+                "--archive",
+                f"--chown={server.username}:{server.username}",
+                "/root/.ssh/authorized_keys",
+                f"/home/{server.username}/.ssh",
+            ] & FG
+    with SshRunner(server) as ssh:
+        ssh.pip["install", "poetry"] & FG
+    with SshRunner(server) as ssh:
+        if not ssh.cmd.path(f"/home/{server.username}/cycl/.git").exists():
+            ssh.git["clone", "https://github.com/alekseyev/cycl.git"] & FG
+        ssh.cmd.cwd.chdir(ssh.cmd.cwd / "cycl")
+        ssh.git["pull"] & FG
+        ssh.cmd["poetry"]["install", "--no-dev"] & FG
+
+
+@app.command()
 def remote_logs():
     """
     Show logs for remote docker-compose
     """
-    with SshRunner(conf) as ssh:
+    server = conf.servers[conf.app.server]
+    with SshRunner(server, conf.app.directory) as ssh:
         ssh.docker_compose["-f", conf.app.compose_file, "logs", "-f", "--tail=100"] & FG
 
 
@@ -62,7 +94,8 @@ def deploy_update():
     """
     Update remote deployment, restarts only servers in deploy.servers
     """
-    with SshRunner(conf) as ssh:
+    server = conf.servers[conf.app.server]
+    with SshRunner(server, conf.app.directory) as ssh:
         ssh.git["checkout", "."] & FG
         ssh.git["pull"] & FG
         ssh.git["checkout", conf.app.branch] & FG
@@ -79,7 +112,8 @@ def full_update():
     """
     Update remote deployment, rebuilds with --no-cache, restarts ALL servers
     """
-    with SshRunner(conf) as ssh:
+    server = conf.servers[conf.app.server]
+    with SshRunner(server, conf.app.directory) as ssh:
         ssh.git["checkout", "."] & FG
         ssh.git["pull"] & FG
         ssh.git["checkout", conf.app.branch] & FG
@@ -90,9 +124,17 @@ def full_update():
 
 
 @app.callback()
-def main(config_path: Optional[str] = None):
-    if config_path:
-        conf.config_path = config_path
+def main(
+    config_dir: Optional[str] = None,
+    app_config_dir: Optional[str] = None,
+    app_config: Optional[str] = None,
+):
+    if config_dir:
+        conf.config_dir = Path(config_dir)
+    if app_config:
+        conf.app_config = Path(app_config)
+    elif app_config_dir:
+        conf.app_config = Path(app_config_dir) / "cycl.yaml"
     load_settings()
 
 
