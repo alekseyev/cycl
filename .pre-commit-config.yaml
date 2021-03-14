@@ -19,12 +19,6 @@ repos:
         language: system
         entry: poetry run flake8
         types: [python]
-      - id: mypy
-        name: mypy
-        stages: [commit]
-        language: system
-        entry: poetry run mypy
-        types: [python]
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v2.4.0
     hooks:

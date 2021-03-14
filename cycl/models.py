@@ -5,6 +5,21 @@ import typer
 from pydantic import BaseModel
 
 
+class WorkerSettings(BaseModel):
+    port: int = None
+    type: str
+    entrypoint: str
+
+
+class UtilitySettings(BaseModel):
+    type: str
+
+
+class ProjectSettings(BaseModel):
+    workers: Dict[str, WorkerSettings] = {}
+    utilities: Dict[str, UtilitySettings] = {}
+
+
 class AppDeploymentSettings(BaseModel):
     server = "server"
     directory = "example"
@@ -22,6 +37,11 @@ class Server(BaseModel):
 
 class Globals(BaseModel):
     config_dir = Path(typer.get_app_dir("cycl"))
-    app_config = Path.cwd() / "cycl.yaml"
+    project_dir = Path.cwd()
+    proj_config = Path.cwd() / "cycl.yaml"
     servers: Dict[str, Server] = {}
-    app = AppDeploymentSettings()
+    proj = ProjectSettings()
+
+
+class UtilityData(BaseModel):
+    password: str = None

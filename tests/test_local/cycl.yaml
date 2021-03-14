@@ -1,0 +1,11 @@
+workers:
+  webworker:
+    port: 8000
+    type: python-web-fastapi
+    entrypoint: test_app.server:app
+
+utilities:
+  cache:
+    type: redis
+  maindb:
+    type: mongo
